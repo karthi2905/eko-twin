@@ -4,7 +4,7 @@ import {
     Tooltip, ResponsiveContainer, ReferenceLine, Legend
 } from 'recharts';
 import { Brain, Clock, Calendar, TrendingUp, TrendingDown, Activity } from 'lucide-react';
-import { generatePredictions } from '../data/cityData.js';
+import { predictEmissions } from '../api.js';
 
 const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload?.length) return null;
@@ -46,7 +46,19 @@ const FEATURES = [
 
 export default function Predictions() {
     const [horizon, setHorizon] = useState('24h');
-    const data = generatePredictions(horizon);
+    const [data, setData] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        setLoading(true);
+        predictEmissions({ horizon }).then(res => {
+            setData(res.predictions);
+            setLoading(false);
+        }).catch(err => {
+            console.error(err);
+            setLoading(false);
+        });
+    }, [horizon]);
 
     const latestPredicted = data[data.length - 1]?.predicted ?? 0;
     const firstPredicted = data[0]?.predicted ?? 0;

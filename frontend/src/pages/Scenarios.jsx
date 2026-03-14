@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LineChart, Line } from 'recharts';
 import { GitCompare, Plus, Trash2, Play, Download, Trophy } from 'lucide-react';
-import { simulateScenario } from '../data/cityData.js';
+import { simulateScenario } from '../api.js';
 
 const PRESET_SCENARIOS = [
     { name: 'Green City Plan', params: { treeCount: 20, trafficReduction: 30, renewableEnergy: 40, biofilters: 10, carbonCapture: 5 } },
@@ -31,21 +31,37 @@ const CustomTooltip = ({ active, payload, label }) => {
 export default function Scenarios() {
     const [scenarios, setScenarios] = useState(() =>
         PRESET_SCENARIOS.slice(0, 3).map((s, i) => ({
-            ...s,
-            id: i,
-            color: COLORS[i],
-            results: simulateScenario(s.params),
+            ...s, id: i, color: COLORS[i],
+            results: { totalReduction: 0, newCO2Level: 0, sustainabilityScore: 0, annualTonnesSaved: 0, costSaving: 0, aiRecommendation: 'Loading...', breakdown: {} },
         }))
     );
-    const [editingId, setEditingId] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        Promise.all(PRESET_SCENARIOS.slice(0, 3).map((s, i) => 
+            simulateScenario(s.params).then(res => ({ id: i, res }))
+        )).then(results => {
+            setScenarios(prev => prev.map(s => {
+                const updated = results.find(r => r.id === s.id);
+                return updated ? { ...s, results: updated.res } : s;
+            }));
+            setLoading(false);
+        }).catch(err => {
+            console.error(err);
+            setLoading(false);
+        });
+    }, []);
 
     const addScenario = () => {
         const next = PRESET_SCENARIOS[scenarios.length % PRESET_SCENARIOS.length];
         const id = Date.now();
         setScenarios(prev => [
             ...prev,
-            { ...next, id, color: COLORS[prev.length % COLORS.length], results: simulateScenario(next.params) },
+            { ...next, id, color: COLORS[prev.length % COLORS.length], results: { totalReduction: 0, newCO2Level: 0, sustainabilityScore: 0, annualTonnesSaved: 0, costSaving: 0, aiRecommendation: 'Loading...', breakdown: {} } },
         ]);
+        simulateScenario(next.params).then(res => {
+            setScenarios(prev => prev.map(s => s.id === id ? { ...s, results: res } : s));
+        });
     };
 
     const removeScenario = (id) => setScenarios(prev => prev.filter(s => s.id !== id));
@@ -53,9 +69,17 @@ export default function Scenarios() {
     const updateParam = (id, key, val) => {
         setScenarios(prev => prev.map(s => {
             if (s.id !== id) return s;
-            const newParams = { ...s.params, [key]: +val };
-            return { ...s, params: newParams, results: simulateScenario(newParams) };
+            return { ...s, params: { ...s.params, [key]: +val } };
         }));
+
+        // Fetch new results async
+        const s = scenarios.find(x => x.id === id);
+        if (s) {
+            const newParams = { ...s.params, [key]: +val };
+            simulateScenario(newParams).then(res => {
+                setScenarios(prev => prev.map(sc => sc.id === id ? { ...sc, results: res } : sc));
+            });
+        }
     };
 
     // Comparison chart data

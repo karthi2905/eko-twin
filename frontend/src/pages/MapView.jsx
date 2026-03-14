@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Popup, Circle, LayerGroup, useMap, Tooltip as MapTooltip } from 'react-leaflet';
 import { Layers, Thermometer, AlertTriangle, Factory, Car, Filter, ZoomIn, MapPin, Globe } from 'lucide-react';
-import { CITY_ZONES, CITY_CENTER, DEFAULT_ZOOM, HOTSPOT_CLUSTERS, CITY_SUMMARIES } from '../data/cityData.js';
+import { CITY_CENTER, DEFAULT_ZOOM, HOTSPOT_CLUSTERS } from '../data/cityData.js';
+import { fetchZones } from '../api.js';
 
 function getColorByCO2(co2) {
     if (co2 >= 110) return '#dc2626';
@@ -25,8 +26,7 @@ const LAYER_OPTIONS = [
     { id: 'industrial', label: 'Industrial Zones', icon: Factory },
 ];
 
-// Cities for the dropdown filter
-const ALL_CITIES = ['All India', ...Array.from(new Set(CITY_ZONES.map(z => z.city))).sort()];
+
 
 export default function MapView() {
     const [activeLayers, setActiveLayers] = useState(['heatmap', 'hotspots']);
@@ -34,6 +34,38 @@ export default function MapView() {
     const [filterCity, setFilterCity] = useState('All India');
     const [filterType, setFilterType] = useState('all');
     const [viewMode, setViewMode] = useState('india'); // 'india' | 'city'
+    
+    const [zones, setZones] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        fetchZones().then(data => {
+            setZones(data.map(z => ({...z, co2: z.co2_live})));
+            setLoading(false);
+        }).catch(err => {
+            console.error(err);
+            setLoading(false);
+        });
+    }, []);
+
+    const ALL_CITIES = ['All India', ...Array.from(new Set(zones.map(z => z.city))).sort()];
+
+    const CITY_SUMMARIES = Object.values(
+        zones.reduce((acc, z) => {
+            if (!acc[z.city]) acc[z.city] = { city: z.city, zones: [], lat: z.lat, lng: z.lng };
+            acc[z.city].zones.push(z);
+            return acc;
+        }, {})
+    ).map(c => ({
+        city: c.city,
+        lat: c.lat,
+        lng: c.lng,
+        avg_co2: +(c.zones.reduce((s, z) => s + z.co2, 0) / c.zones.length).toFixed(1),
+        max_co2: Math.max(...c.zones.map(z => z.co2)),
+        zone_count: c.zones.length,
+        total_population: c.zones.reduce((s, z) => s + z.population, 0),
+        critical_zones: c.zones.filter(z => z.co2 > 100).length,
+    }));
 
     const toggleLayer = (id) => {
         setActiveLayers(prev =>
@@ -41,7 +73,7 @@ export default function MapView() {
         );
     };
 
-    const filteredZones = CITY_ZONES.filter(z => {
+    const filteredZones = zones.filter(z => {
         const cityMatch = filterCity === 'All India' || z.city === filterCity;
         const typeMatch = filterType === 'all' || z.type === filterType;
         return cityMatch && typeMatch;
@@ -55,6 +87,8 @@ export default function MapView() {
         critical: filteredZones.filter(z => z.co2 >= 100).length,
         zones: filteredZones.length,
     };
+
+    if (loading) return <div style={{padding: 40, textAlign: 'center', color: 'var(--text-muted)'}}>Loading live MapView data...</div>;
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>

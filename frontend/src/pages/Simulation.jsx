@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { Play, Pause, RotateCcw, Sliders, Zap, Trees, Wind, Radio, Gauge } from 'lucide-react';
-import { simulateScenario, generateHourlyData } from '../data/cityData.js';
+import { generateHourlyData } from '../data/cityData.js';
+import { simulateScenario } from '../api.js';
 
 const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload?.length) return null;
@@ -53,15 +54,20 @@ const SLIDERS = [
 
 export default function Simulation() {
     const [params, setParams] = useState(DEFAULT_PARAMS);
-    const [results, setResults] = useState(() => simulateScenario(DEFAULT_PARAMS));
+    const [results, setResults] = useState({
+        totalReduction: 0, newCO2Level: 68.4, sustainabilityScore: 0, 
+        annualTonnesSaved: 0, costSaving: 0, aiRecommendation: 'Loading...', 
+        breakdown: { trees: 0, traffic: 0, energy: 0, biofilters: 0, carbonCapture: 0 }
+    });
     const [running, setRunning] = useState(false);
     const [twinData, setTwinData] = useState(() => generateHourlyData(68.4));
     const [simulatedData, setSimulatedData] = useState(() => generateHourlyData(68.4));
 
     useEffect(() => {
-        const r = simulateScenario(params);
-        setResults(r);
-        setSimulatedData(generateHourlyData(r.newCO2Level));
+        simulateScenario(params).then(r => {
+            setResults(r);
+            setSimulatedData(generateHourlyData(r.newCO2Level));
+        }).catch(err => console.error(err));
     }, [params]);
 
     // Live twin animation

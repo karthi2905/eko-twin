@@ -28,16 +28,17 @@ app.add_middleware(
 
 # ─── Synthetic Data Generators ───────────────────────────────────────────────
 
-ZONES = [
-    {"id": 1,  "name": "Dharavi Industrial",   "lat": 19.041, "lng": 72.853, "co2_base": 98.4,  "type": "industrial",  "traffic": 87, "population": 92000},
-    {"id": 2,  "name": "Kurla Commercial",     "lat": 19.072, "lng": 72.879, "co2_base": 74.2,  "type": "commercial",  "traffic": 76, "population": 61000},
-    {"id": 3,  "name": "Bandra West",          "lat": 19.054, "lng": 72.828, "co2_base": 42.1,  "type": "residential", "traffic": 55, "population": 78000},
-    {"id": 4,  "name": "Andheri East",         "lat": 19.115, "lng": 72.869, "co2_base": 81.7,  "type": "commercial",  "traffic": 82, "population": 89000},
-    {"id": 5,  "name": "Thane Industrial",     "lat": 19.218, "lng": 72.978, "co2_base": 117.3, "type": "industrial",  "traffic": 91, "population": 67000},
-    {"id": 6,  "name": "Juhu Residential",     "lat": 19.102, "lng": 72.827, "co2_base": 28.7,  "type": "residential", "traffic": 38, "population": 39000},
-    {"id": 7,  "name": "Sewri Port",           "lat": 18.990, "lng": 72.861, "co2_base": 109.2, "type": "industrial",  "traffic": 85, "population": 22000},
-    {"id": 8,  "name": "Worli Sea Face",       "lat": 19.018, "lng": 72.818, "co2_base": 31.2,  "type": "residential", "traffic": 41, "population": 42000},
-]
+import json
+import os
+
+_ZONES_PATH = os.path.join(os.path.dirname(__file__), "zones.json")
+with open(_ZONES_PATH, "r", encoding="utf-8") as _f:
+    _raw_zones = json.load(_f)
+
+ZONES = []
+for _z in _raw_zones:
+    _z["co2_base"] = _z.get("co2", 68.4)  # Map co2 -> co2_base
+    ZONES.append(_z)
 
 
 def generate_co2_value(base: float, hour: int = None) -> float:

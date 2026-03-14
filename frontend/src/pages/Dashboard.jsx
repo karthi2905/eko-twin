@@ -8,9 +8,9 @@ import {
     AlertTriangle, Leaf, Zap, Globe, Award, ArrowUp, ArrowDown
 } from 'lucide-react';
 import {
-    CITY_ZONES, EMISSION_SOURCES, generateHourlyData,
-    generateWeeklyData, LEADERBOARD, HOTSPOT_CLUSTERS, CITY_SUMMARIES
+    EMISSION_SOURCES, LEADERBOARD
 } from '../data/cityData.js';
+import { fetchSummary, fetchHourlyEmissions, fetchWeeklyEmissions, fetchZones } from '../api.js';
 
 const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload?.length) return null;
@@ -28,23 +28,43 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 export default function Dashboard() {
-    const [hourlyData] = useState(() => generateHourlyData(68));
-    const [weeklyData] = useState(() => generateWeeklyData());
+    const [hourlyData, setHourlyData] = useState([]);
+    const [weeklyData, setWeeklyData] = useState([]);
+    const [zones, setZones] = useState([]);
     const [liveStats, setLiveStats] = useState({ totalCO2: 78.4, aqi: 168, hotspots: 10, reduction: 9.2 });
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        Promise.all([
+            fetchHourlyEmissions(),
+            fetchWeeklyEmissions(),
+            fetchZones(),
+            fetchSummary()
+        ]).then(([hourly, weekly, zns, sum]) => {
+            setHourlyData(hourly);
+            setWeeklyData(weekly);
+            setZones(zns.map(z => ({...z, co2: z.co2_live})));
+            setLiveStats({ totalCO2: sum.avg_co2, aqi: sum.aqi_city, hotspots: sum.hotspot_count, reduction: 9.2 });
+            setLoading(false);
+        }).catch(err => {
+            console.error("Failed to fetch data:", err);
+            setLoading(false);
+        });
+
         const interval = setInterval(() => {
             setLiveStats(prev => ({
+                ...prev,
                 totalCO2: +(prev.totalCO2 + (Math.random() - 0.5) * 0.5).toFixed(1),
                 aqi: Math.max(80, Math.min(200, prev.aqi + Math.round((Math.random() - 0.5) * 3))),
-                hotspots: prev.hotspots,
                 reduction: +(prev.reduction + (Math.random() - 0.5) * 0.2).toFixed(1),
             }));
         }, 3000);
         return () => clearInterval(interval);
     }, []);
 
-    const topZones = [...CITY_ZONES]
+    if (loading) return <div style={{padding: 40, textAlign: 'center', color: 'var(--text-muted)'}}>Loading live dashboard data...</div>;
+
+    const topZones = [...zones]
         .sort((a, b) => b.co2 - a.co2)
         .slice(0, 8);
 
