@@ -11,6 +11,21 @@ import pandas as pd
 from datetime import datetime, timedelta
 import random
 import math
+import pickle
+import os
+
+# Load ML Models if available
+_forecast_model = None
+_scenario_model = None
+try:
+    _models_dir = os.path.join(os.path.dirname(__file__), "ml", "models")
+    with open(os.path.join(_models_dir, "forecast_model.pkl"), "rb") as f:
+        _forecast_model = pickle.load(f)
+    with open(os.path.join(_models_dir, "scenario_model.pkl"), "rb") as f:
+        _scenario_model = pickle.load(f)
+    print("Loaded Advanced ML Models successfully!")
+except Exception as e:
+    print(f"Failed to load ML models (falling back to heuristics). Error: {e}")
 
 app = FastAPI(
     title="EcoTwin API",
@@ -67,17 +82,41 @@ class PredictionRequest(BaseModel):
 # ─── AI Simulation Core ──────────────────────────────────────────────────────
 
 def simulate_scenario(params: ScenarioInput) -> dict:
-    tree_impact      = params.tree_count * 0.08
-    traffic_impact   = params.traffic_reduction * 0.45
-    energy_impact    = params.renewable_energy * 0.22
-    biofilter_impact = params.biofilters * 0.15
-    capture_impact   = params.carbon_capture * 0.12
-
-    total_reduction = min(
-        tree_impact + traffic_impact + energy_impact + biofilter_impact + capture_impact,
-        92.0
-    )
     baseline = 68.4
+
+    if _scenario_model:
+        # Use XGBoost model
+        # Features: ['trees', 'traffic', 'renewables', 'biofilters', 'ccs']
+        features = pd.DataFrame([[
+            params.tree_count, 
+            params.traffic_reduction, 
+            params.renewable_energy, 
+            params.biofilters, 
+            params.carbon_capture
+        ]], columns=['trees', 'traffic', 'renewables', 'biofilters', 'ccs'])
+        total_reduction = float(_scenario_model.predict(features)[0])
+        # Model returns the reduction directly. Let's clamp it.
+        total_reduction = max(0.0, min(95.0, total_reduction))
+        
+        # Estimate individual impacts based on weights loosely mirroring model importance
+        tree_impact = params.tree_count * 0.09
+        traffic_impact = params.traffic_reduction * 0.48
+        energy_impact = params.renewable_energy * 0.25
+        biofilter_impact = params.biofilters * 0.17
+        capture_impact = params.carbon_capture * 0.14
+    else:
+        # Heuristic fallback
+        tree_impact      = params.tree_count * 0.08
+        traffic_impact   = params.traffic_reduction * 0.45
+        energy_impact    = params.renewable_energy * 0.22
+        biofilter_impact = params.biofilters * 0.15
+        capture_impact   = params.carbon_capture * 0.12
+
+        total_reduction = min(
+            tree_impact + traffic_impact + energy_impact + biofilter_impact + capture_impact,
+            92.0
+        )
+
     new_co2 = baseline * (1 - total_reduction / 100)
     score = min(round(total_reduction * 1.08), 100)
 
@@ -108,14 +147,72 @@ def simulate_scenario(params: ScenarioInput) -> dict:
 
 def generate_predictions(base_co2: float, horizon: str) -> list:
     if horizon == "24h":
+        hours = 24
         labels = [f"{h:02d}:00" for h in range(24)]
-        noise_scale = 3
     elif horizon == "7d":
+        hours = 7 * 24
         labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-        noise_scale = 4
     else:
+        hours = 30 * 24
         labels = [f"Day {i+1}" for i in range(30)]
-        noise_scale = 5
+
+    results = []
+    
+    if _forecast_model:
+        # Use RandomForest model
+        now = datetime.now()
+        features_list = []
+        for i in range(hours):
+            target_time = now + timedelta(hours=i)
+            h = target_time.hour
+            dow = target_time.weekday()
+            m = target_time.month
+            
+            # Simulated exogenous variables for the future
+            if dow < 5:
+                if 7 <= h <= 10 or 17 <= h <= 20: traffic = 85
+                elif 1 <= h <= 5: traffic = 20
+                else: traffic = 60
+                ind = 1.0
+            else:
+                traffic = 40
+                ind = 0.5
+                
+            temp = 25 - 5 * np.cos((h - 14) * np.pi / 12)
+            wind = 10.0
+            
+            features_list.append({
+                'hour_sin': np.sin(2 * np.pi * h / 24),
+                'hour_cos': np.cos(2 * np.pi * h / 24),
+                'day_of_week': dow,
+                'month': m,
+                'base_co2': base_co2,
+                'traffic_load': traffic,
+                'temperature': temp,
+                'wind_speed': wind,
+                'industrial_active': ind
+            })
+            
+        df_features = pd.DataFrame(features_list)
+        preds = _forecast_model.predict(df_features)
+        
+        # Aggregate based on horizon
+        if horizon == "24h":
+            for i, p in enumerate(preds):
+                pred = round(p, 2)
+                results.append({"label": labels[i], "predicted": pred, "lower": round(pred - 3, 2), "upper": round(pred + 3, 2)})
+        else:
+            # Group by day
+            daily_preds = [np.mean(preds[i:i+24]) for i in range(0, hours, 24)]
+            noise_scale = 4 if horizon == "7d" else 5
+            for i, p in enumerate(daily_preds):
+                pred = round(p, 2)
+                results.append({"label": labels[i], "predicted": pred, "lower": round(pred - noise_scale, 2), "upper": round(pred + noise_scale, 2)})
+                
+        return results
+
+    # Fallback heuristic
+    noise_scale = 3 if horizon == "24h" else (4 if horizon == "7d" else 5)
 
     results = []
     for i, label in enumerate(labels):
